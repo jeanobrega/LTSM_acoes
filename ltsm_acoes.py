@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import Dense, LSTM
 from tensorflow.keras.models import Sequential
 from sklearn.preprocessing import MinMaxScaler
+
 pd.options.mode.chained_assignment = None
 tf.random.set_seed(0)
 
@@ -16,10 +17,13 @@ if 'dados' not in st.session_state:
     st.session_state['dados']=pd.DataFrame()
 if 'predict' not in st.session_state:
     st.session_state['predict']=pd.DataFrame()
+if 'pred_status' not in st.session_state:
+    st.session_state['pred_status']='Em espera'
 
 def limpa(): #limpa ao mudar o selectbox
     st.session_state['dados']=pd.DataFrame()
     st.session_state['predict']=pd.DataFrame()
+    st.session_state['pred_status']='Em espera'
 
 def get_data(symbol='BOV^BOVA11',freq='DAILY',period='1Y'):
     try:
@@ -45,15 +49,18 @@ def get_data(symbol='BOV^BOVA11',freq='DAILY',period='1Y'):
         )
         dados['Date'] = pd.to_datetime(dados['Date'],unit='s') # transforma Date de epoch para datetime
         dados.set_index('Date',inplace=True)
+        tam=int(1*len(dados['Close'])) #mudar o fator p/ um valor <= 1 caso deseje avaliar só parte dos dados
+        dados=dados.head(tam)
         st.session_state['dados']=dados
     except Exception as error:
         print('Erro (getData): ',error)
         return {'Erro': error}
 
 def predict(df):
+    st.session_state['pred_status']='Aguarde...'
     y = df['Close']
     y = y.values.reshape(-1, 1)
-
+    
     # scale the data
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaler = scaler.fit(y)
@@ -84,7 +91,6 @@ def predict(df):
 
     model.compile(loss='mean_squared_error', optimizer='adam')
     model.fit(X, Y, epochs=100, batch_size=32, verbose=2)
-
     # generate the forecasts
     X_ = y[- n_lookback:]  # last available input sequence
     X_ = X_.reshape(1, n_lookback, 1)
@@ -109,18 +115,23 @@ def predict(df):
    
     results = pd.concat([df_past,df_future]).set_index('Date')
     st.session_state['predict']=results
+    st.session_state['pred_status']='Concluído!'
     
 
 
 with st.container(border=True):
     st.title("Previsão Ações")
-    acao = st.selectbox("Ação:",["BOVA11","PETR4","BBAS3"],on_change=limpa)
+    ativo=st.radio("Tipo:",['Ações','Cripto'],on_change=limpa)
+    ativos= ["BOVA11","PETR4","BBAS3"] if ativo == 'Ações' else ['BTCUSD','ETHUSD']
+    acao = st.selectbox("Ativo:",ativos,on_change=limpa)
     periodo = st.select_slider("Período anterior (meses)", [3,6,12,36,60],12,on_change=limpa)
-    symbol = 'BOV^'+acao
+    symbol = 'BOV^'+acao if ativo == 'Ações' else 'COIN^'+acao
     frequencia='WEEKLY' if periodo > 12 else 'DAILY'
     period=str(periodo)+'M' if periodo < 12 else str(int(periodo/12))+'Y'
     st.button("Carregar Dados",on_click=get_data,args=[symbol,frequencia,period])
     st.button("Iniciar Previsão!",on_click=predict,args=[st.session_state['dados']])
+    status_text = '' if st.session_state['pred_status'] == 'Em espera' else st.session_state['pred_status']
+    st.text(status_text)
 print(period)
 tab1, tab2 = st.tabs(["Dataframe", "Chart"])#,"Prediction"])
 dados=st.session_state['dados']
@@ -143,11 +154,3 @@ if not prediction.empty:
     ax=prediction['Forecast'].plot()
     ax.grid()
     tab2.pyplot(fig)
-
-
-
-
-
-
-
-
